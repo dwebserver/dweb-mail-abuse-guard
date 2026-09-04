@@ -32,6 +32,10 @@ type Releaser interface {
 	Release(context.Context, string, string) error
 }
 
+type Reporter interface {
+	Send(context.Context) error
+}
+
 type Status struct {
 	Mode      config.Mode      `json:"mode"`
 	Incidents []store.Incident `json:"incidents"`
@@ -41,10 +45,15 @@ type Server struct {
 	mode     config.Mode
 	state    State
 	releaser Releaser
+	reporter Reporter
 }
 
 func NewServer(mode config.Mode, state State, releaser Releaser) *Server {
 	return &Server{mode: mode, state: state, releaser: releaser}
+}
+
+func (s *Server) SetReporter(reporter Reporter) {
+	s.reporter = reporter
 }
 
 // Serve listens until cancellation. It removes only a stale socket at the
@@ -97,7 +106,20 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", s.status)
 	mux.HandleFunc("POST /v1/incidents/{id}/release", s.release)
+	mux.HandleFunc("POST /v1/report", s.report)
 	return mux
+}
+
+func (s *Server) report(writer http.ResponseWriter, request *http.Request) {
+	if s.reporter == nil {
+		http.Error(writer, "email reporting is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.reporter.Send(request.Context()); err != nil {
+		http.Error(writer, "send health report failed", http.StatusBadGateway)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 func (s *Server) status(writer http.ResponseWriter, _ *http.Request) {
@@ -189,6 +211,11 @@ func (c *Client) Release(ctx context.Context, id string) (store.Incident, error)
 		return store.Incident{}, err
 	}
 	return result, nil
+}
+
+func (c *Client) Report(ctx context.Context) error {
+	var result map[string]string
+	return c.request(ctx, http.MethodPost, "/v1/report", &result)
 }
 
 func (c *Client) request(ctx context.Context, method, path string, destination any) error {

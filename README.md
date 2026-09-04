@@ -31,6 +31,7 @@ The installer preserves an existing configuration and always uses the supplied a
 systemctl status dweb-mail-abuse-guard
 journalctl -u dweb-mail-abuse-guard -f
 dweb-mail-abuse-guardctl status
+dweb-mail-abuse-guardctl report
 ```
 
 Before deployment, replay a historical log to check the thresholds against real traffic:
@@ -47,6 +48,8 @@ Read [Configuration](docs/configuration.md), [Operations](docs/operations.md), [
 ## Privacy and safety
 
 The state database contains timestamps, mailbox identities, source IPs, Exim message IDs, envelope senders, counts, and incident decisions. It does not store passwords, message bodies, subjects, or recipient addresses. Command execution never passes through a shell, and every identity crossing the privilege boundary is validated again by the helper.
+
+Optional email reporting uses the host's local sendmail-compatible transport. It sends immediate incident and fatal service alerts, reports recovery after an unclean stop, and sends a daily 24-hour health summary even when no suspicious activity was observed.
 
 ## License
 

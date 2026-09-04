@@ -24,16 +24,38 @@ func main() {
 
 func run(arguments []string) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: dweb-mail-abuse-guardctl <status|release> [options]")
+		return errors.New("usage: dweb-mail-abuse-guardctl <status|release|report> [options]")
 	}
 	switch arguments[0] {
 	case "status":
 		return status(arguments[1:], os.Stdout)
 	case "release":
 		return release(arguments[1:])
+	case "report":
+		return reportNow(arguments[1:])
 	default:
 		return fmt.Errorf("unknown command %q", arguments[0])
 	}
+}
+
+func reportNow(arguments []string) error {
+	flags := flag.NewFlagSet("report", flag.ContinueOnError)
+	configPath := flags.String("config", "/etc/dweb-mail-abuse-guard/config.yml", "configuration file")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	client := control.NewClient(cfg.ControlSocket, cfg.Notification.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Notification.Timeout)
+	defer cancel()
+	if err := client.Report(ctx); err != nil {
+		return err
+	}
+	fmt.Println("daily health report sent")
+	return nil
 }
 
 func status(arguments []string, output io.Writer) error {

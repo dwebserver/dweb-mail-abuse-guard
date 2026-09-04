@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/dwebserver/dweb-mail-abuse-guard/internal/parser"
 	"github.com/dwebserver/dweb-mail-abuse-guard/internal/platform"
 	"github.com/dwebserver/dweb-mail-abuse-guard/internal/policy"
+	"github.com/dwebserver/dweb-mail-abuse-guard/internal/report"
 	"github.com/dwebserver/dweb-mail-abuse-guard/internal/service"
 	"github.com/dwebserver/dweb-mail-abuse-guard/internal/store"
 )
@@ -69,7 +71,31 @@ func validateConfig(arguments []string) error {
 	return err
 }
 
-func runDaemon(arguments []string) error {
+func runDaemon(arguments []string) (resultErr error) {
+	var operationalMailer *notify.Email
+	var hostname string
+	var panicDetail string
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			stack := string(debug.Stack())
+			panicDetail = fmt.Sprintf("Panic: %v\n\nStack:\n%s", recovered, stack)
+			resultErr = fmt.Errorf("unexpected panic: %v", recovered)
+		}
+		if resultErr != nil && operationalMailer != nil {
+			detail := fmt.Sprintf("Error: %v", resultErr)
+			subject := "[DWEB Mail Guard] Service failure"
+			if panicDetail != "" {
+				detail = panicDetail
+				subject = "[DWEB Mail Guard] Service panic"
+			}
+			alertCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := operationalMailer.SendMessage(alertCtx, subject, fmt.Sprintf("The monitoring service on %s stopped because of a fatal error. Systemd is configured to restart it.\n\n%s\nTime: %s\n", hostname, detail, time.Now().UTC().Format(time.RFC3339))); err != nil {
+				slog.Error("service failure email failed", "error", err)
+			}
+			cancel()
+		}
+	}()
+
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	path := flags.String("config", "/etc/dweb-mail-abuse-guard/config.yml", "configuration file")
 	if err := flags.Parse(arguments); err != nil {
@@ -78,6 +104,13 @@ func runDaemon(arguments []string) error {
 	cfg, err := config.Load(*path)
 	if err != nil {
 		return err
+	}
+	hostname, err = os.Hostname()
+	if err != nil {
+		return fmt.Errorf("read server hostname: %w", err)
+	}
+	if cfg.Notification.EmailTo != "" {
+		operationalMailer = notify.NewEmail(cfg.Notification.SendmailPath, cfg.Notification.EmailTo, cfg.Notification.EmailFrom, hostname)
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.StatePath), 0o750); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
@@ -91,28 +124,66 @@ func runDaemon(arguments []string) error {
 	if err != nil {
 		return err
 	}
+	startedAt := time.Now().UTC()
+	previous, previousFound, err := database.BeginRun(startedAt)
+	if err != nil {
+		return err
+	}
 	engine := policy.NewEngine(cfg, seed)
 	helper := action.NewHelper(platform.ExecRunner{}, cfg.Actions.HelperPath, cfg.Actions.HelperArgs, cfg.Actions.Timeout)
-	var sender notify.Sender = notify.Noop{}
+	channels := make(notify.Multi, 0, 2)
 	if cfg.Notification.WebhookURLFile != "" {
-		sender, err = notify.NewWebhook(cfg.Notification.WebhookURLFile, cfg.Notification.Timeout)
+		webhook, webhookErr := notify.NewWebhook(cfg.Notification.WebhookURLFile, cfg.Notification.Timeout)
+		err = webhookErr
 		if err != nil {
 			return err
 		}
+		channels = append(channels, webhook)
+	}
+	if operationalMailer != nil {
+		channels = append(channels, operationalMailer)
+	}
+	var sender notify.Sender = notify.Noop{}
+	if len(channels) > 0 {
+		sender = channels
 	}
 	handler := service.New(cfg, engine, database, helper, sender, slog.Default())
 	controlServer := control.NewServer(cfg.Mode, database, helper)
+	components := []func(context.Context) error{
+		func(componentCtx context.Context) error { return followSources(componentCtx, cfg, database, handler) },
+		func(componentCtx context.Context) error { return controlServer.Serve(componentCtx, cfg.ControlSocket) },
+	}
+	if operationalMailer != nil {
+		reporter := report.New(database, operationalMailer, cfg.Mode, hostname, version, startedAt, cfg.Notification.DailyHour, cfg.Notification.DailyMinute, cfg.Notification.Timeout, slog.Default())
+		controlServer.SetReporter(reporter)
+		components = append(components, reporter.Run)
+		if previousFound && !previous.CleanShutdown {
+			alertCtx, cancel := context.WithTimeout(context.Background(), cfg.Notification.Timeout)
+			err := operationalMailer.SendMessage(alertCtx, "[DWEB Mail Guard] Service recovered after an unclean stop", fmt.Sprintf("The monitoring service is running again on %s. Its previous run did not record a clean shutdown.\n\nPrevious start: %s\nLast recorded heartbeat: %s\nCurrent start: %s\n", hostname, previous.StartedAt.UTC().Format(time.RFC3339), previous.HeartbeatAt.UTC().Format(time.RFC3339), startedAt.Format(time.RFC3339)))
+			cancel()
+			if err != nil {
+				slog.Error("unclean-stop recovery email failed", "error", err)
+			}
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	slog.Info("mail abuse guard started", "version", version, "mode", cfg.Mode, "sources", len(cfg.Sources))
-	return runComponents(ctx,
-		func(componentCtx context.Context) error { return followSources(componentCtx, cfg, database, handler) },
-		func(componentCtx context.Context) error { return controlServer.Serve(componentCtx, cfg.ControlSocket) },
-	)
+	resultErr = runComponents(ctx, components...)
+	if resultErr != nil {
+		return resultErr
+	}
+	if err := database.EndRun(time.Now().UTC()); err != nil {
+		return fmt.Errorf("record clean service shutdown: %w", err)
+	}
+	return nil
 }
 
 func runComponents(ctx context.Context, components ...func(context.Context) error) error {
+	if len(components) == 0 {
+		return fmt.Errorf("at least one service component is required")
+	}
 	componentCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan error, len(components))

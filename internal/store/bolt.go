@@ -19,6 +19,8 @@ var (
 	incidentsBucket = []byte("incidents")
 	activeBucket    = []byte("active_incidents")
 	cursorsBucket   = []byte("cursors")
+	runtimeBucket   = []byte("runtime")
+	runtimeKey      = []byte("state")
 )
 
 type IncidentStatus string
@@ -48,6 +50,14 @@ type Cursor struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// RuntimeState lets a new process distinguish a clean service restart from an
+// abrupt termination that could not send an alert before dying.
+type RuntimeState struct {
+	StartedAt     time.Time `json:"started_at"`
+	HeartbeatAt   time.Time `json:"heartbeat_at"`
+	CleanShutdown bool      `json:"clean_shutdown"`
+}
+
 // Bolt wraps bbolt with a small schema owned by the agent.
 type Bolt struct {
 	db *bolt.DB
@@ -64,7 +74,7 @@ func Open(path string, readOnly bool) (*Bolt, error) {
 	store := &Bolt{db: db}
 	if !readOnly {
 		if err := db.Update(func(tx *bolt.Tx) error {
-			for _, name := range [][]byte{eventsBucket, incidentsBucket, activeBucket, cursorsBucket} {
+			for _, name := range [][]byte{eventsBucket, incidentsBucket, activeBucket, cursorsBucket, runtimeBucket} {
 				if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 					return err
 				}
@@ -76,6 +86,56 @@ func Open(path string, readOnly bool) (*Bolt, error) {
 		}
 	}
 	return store, nil
+}
+
+func (s *Bolt) BeginRun(at time.Time) (RuntimeState, bool, error) {
+	var previous RuntimeState
+	found := false
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(runtimeBucket)
+		if value := bucket.Get(runtimeKey); value != nil {
+			if err := json.Unmarshal(value, &previous); err != nil {
+				return fmt.Errorf("decode runtime state: %w", err)
+			}
+			found = true
+		}
+		current := RuntimeState{StartedAt: at, HeartbeatAt: at, CleanShutdown: false}
+		encoded, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		return bucket.Put(runtimeKey, encoded)
+	})
+	return previous, found, err
+}
+
+func (s *Bolt) Heartbeat(at time.Time) error {
+	return s.updateRuntime(at, false)
+}
+
+func (s *Bolt) EndRun(at time.Time) error {
+	return s.updateRuntime(at, true)
+}
+
+func (s *Bolt) updateRuntime(at time.Time, clean bool) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(runtimeBucket)
+		value := bucket.Get(runtimeKey)
+		if value == nil {
+			return fmt.Errorf("runtime state is not initialized")
+		}
+		var current RuntimeState
+		if err := json.Unmarshal(value, &current); err != nil {
+			return fmt.Errorf("decode runtime state: %w", err)
+		}
+		current.HeartbeatAt = at
+		current.CleanShutdown = clean
+		encoded, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		return bucket.Put(runtimeKey, encoded)
+	})
 }
 
 func (s *Bolt) Close() error {

@@ -133,3 +133,35 @@ func TestValidatePolicyRelationships(t *testing.T) {
 		t.Fatal("bad cooldown should fail")
 	}
 }
+
+func TestEmailNotificationValidation(t *testing.T) {
+	base, err := Load(validConfig(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.Notification.EmailTo = "Fabrice@Example.com"
+	base.Notification.EmailFrom = "guard@example.com"
+	base.Notification.SendmailPath = filepath.Join(t.TempDir(), "sendmail")
+	base.Notification.DailyReportAt = "07:30"
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if base.Notification.EmailTo != "fabrice@example.com" || base.Notification.DailyHour != 7 || base.Notification.DailyMinute != 30 {
+		t.Fatal(base.Notification)
+	}
+
+	mutations := []func(*Notification){
+		func(n *Notification) { n.EmailTo = "bad" },
+		func(n *Notification) { n.EmailFrom = "bad" },
+		func(n *Notification) { n.SendmailPath = "relative" },
+		func(n *Notification) { n.DailyReportAt = "25:00" },
+	}
+	for index, mutate := range mutations {
+		candidate := base
+		candidate.Notification = base.Notification
+		mutate(&candidate.Notification)
+		if err := candidate.Validate(); err == nil {
+			t.Errorf("case %d should fail", index)
+		}
+	}
+}

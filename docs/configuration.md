@@ -30,6 +30,23 @@ If log rotation recreates that file without the required access, update the plat
 
 Put one HTTPS webhook URL in a root-managed file and set `webhook_url_file` to its absolute path. The URL is never logged or passed as a process argument. The webhook receives the incident JSON. Empty configuration disables external notifications; incidents still appear in the journal and state database.
 
+Email reporting requires all four email fields. `daily_report_at` uses UTC in `HH:MM` format:
+
+```yaml
+notification:
+  email_to: admin@example.com
+  email_from: mail-guard@example.com
+  sendmail_path: /usr/sbin/sendmail
+  daily_report_at: "07:00"
+  timeout: 10s
+```
+
+Email sends an immediate incident report, fatal service-error alerts, recovery notice after an unclean stop, and one daily health summary. The summary explicitly confirms when no suspicious activity was observed. Test delivery after changing the configuration:
+
+```sh
+dweb-mail-abuse-guardctl report
+```
+
 ## Validation
 
 ```sh

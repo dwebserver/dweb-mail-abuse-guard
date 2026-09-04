@@ -159,3 +159,38 @@ func TestCorruptRecordsAreReported(t *testing.T) {
 		t.Fatal("corrupt cursor hidden")
 	}
 }
+
+func TestRuntimeLifecycle(t *testing.T) {
+	database := openTestStore(t)
+	now := time.Now().UTC()
+	if err := database.Heartbeat(now); err == nil {
+		t.Fatal("heartbeat before start accepted")
+	}
+	previous, found, err := database.BeginRun(now)
+	if err != nil || found || !previous.StartedAt.IsZero() {
+		t.Fatal(previous, found, err)
+	}
+	if err := database.Heartbeat(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.EndRun(now.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	previous, found, err = database.BeginRun(now.Add(3 * time.Minute))
+	if err != nil || !found || !previous.CleanShutdown || !previous.HeartbeatAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatal(previous, found, err)
+	}
+}
+
+func TestCorruptRuntimeIsReported(t *testing.T) {
+	database := openTestStore(t)
+	if err := database.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(runtimeBucket).Put(runtimeKey, []byte("{")) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := database.BeginRun(time.Now()); err == nil {
+		t.Fatal("corrupt runtime hidden")
+	}
+	if err := database.Heartbeat(time.Now()); err == nil {
+		t.Fatal("corrupt heartbeat hidden")
+	}
+}

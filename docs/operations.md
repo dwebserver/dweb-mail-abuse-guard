@@ -32,7 +32,10 @@ Release restores cPanel login and outgoing delivery. It intentionally leaves que
 systemctl status dweb-mail-abuse-guard
 journalctl -u dweb-mail-abuse-guard --since today
 dweb-mail-abuse-guardctl status
+dweb-mail-abuse-guardctl report
 ```
+
+The `report` command sends the same 24-hour health email used by the daily scheduler. Use it after installation or mail-routing changes to verify delivery immediately.
 
 ## Recovery
 

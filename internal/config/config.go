@@ -47,6 +47,12 @@ type Actions struct {
 
 type Notification struct {
 	WebhookURLFile string        `yaml:"webhook_url_file"`
+	EmailTo        string        `yaml:"email_to"`
+	EmailFrom      string        `yaml:"email_from"`
+	SendmailPath   string        `yaml:"sendmail_path"`
+	DailyReportAt  string        `yaml:"daily_report_at"`
+	DailyHour      int           `yaml:"-"`
+	DailyMinute    int           `yaml:"-"`
 	Timeout        time.Duration `yaml:"-"`
 	TimeoutText    string        `yaml:"timeout"`
 }
@@ -162,6 +168,35 @@ func (c *Config) Validate() error {
 	if c.Notification.WebhookURLFile != "" && !filepath.IsAbs(c.Notification.WebhookURLFile) {
 		return fmt.Errorf("notification.webhook_url_file must be absolute")
 	}
+	if err := validateEmailNotification(&c.Notification); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEmailNotification(notification *Notification) error {
+	if notification.EmailTo == "" && notification.EmailFrom == "" && notification.SendmailPath == "" && notification.DailyReportAt == "" {
+		return nil
+	}
+	to, err := identity.NormalizeMailbox(notification.EmailTo)
+	if err != nil {
+		return fmt.Errorf("notification.email_to: %w", err)
+	}
+	from, err := identity.NormalizeMailbox(notification.EmailFrom)
+	if err != nil {
+		return fmt.Errorf("notification.email_from: %w", err)
+	}
+	if !filepath.IsAbs(notification.SendmailPath) {
+		return fmt.Errorf("notification.sendmail_path must be absolute")
+	}
+	when, err := time.Parse("15:04", notification.DailyReportAt)
+	if err != nil {
+		return fmt.Errorf("notification.daily_report_at must use 24-hour UTC format HH:MM")
+	}
+	notification.EmailTo = to
+	notification.EmailFrom = from
+	notification.DailyHour = when.Hour()
+	notification.DailyMinute = when.Minute()
 	return nil
 }
 

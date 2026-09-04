@@ -34,6 +34,12 @@ type fakeReleaser struct {
 	err   error
 	calls int
 }
+type fakeReporter struct {
+	err   error
+	calls int
+}
+
+func (r *fakeReporter) Send(context.Context) error { r.calls++; return r.err }
 
 func (r *fakeReleaser) Release(context.Context, string, string) error { r.calls++; return r.err }
 
@@ -107,7 +113,10 @@ func TestUnixServerAndClient(t *testing.T) {
 	releaser := &fakeReleaser{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- NewServer(config.Enforce, state, releaser).Serve(ctx, path) }()
+	server := NewServer(config.Enforce, state, releaser)
+	reporter := &fakeReporter{}
+	server.SetReporter(reporter)
+	go func() { done <- server.Serve(ctx, path) }()
 	for deadline := time.Now().Add(2 * time.Second); ; {
 		if _, err := os.Stat(path); err == nil {
 			break
@@ -129,9 +138,35 @@ func TestUnixServerAndClient(t *testing.T) {
 	if _, err := client.Release(context.Background(), "missing"); err == nil {
 		t.Fatal("HTTP error hidden")
 	}
+	if err := client.Report(context.Background()); err != nil || reporter.calls != 1 {
+		t.Fatal(err, reporter.calls)
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReportHandler(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/v1/report", nil)
+	server := NewServer(config.Audit, &fakeState{}, nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatal(recorder.Code)
+	}
+	reporter := &fakeReporter{err: errors.New("mail")}
+	server.SetReporter(reporter)
+	recorder = httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatal(recorder.Code)
+	}
+	reporter.err = nil
+	recorder = httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || reporter.calls != 2 {
+		t.Fatal(recorder.Code, reporter.calls)
 	}
 }
 

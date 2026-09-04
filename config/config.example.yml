@@ -43,4 +43,10 @@ actions:
 notification:
   # A root-managed file containing one HTTPS webhook URL, or leave blank.
   webhook_url_file: ""
+  # Configure all four email fields together to enable incident, health, and
+  # daily status email through the server's local mail transport.
+  email_to: ""
+  email_from: ""
+  sendmail_path: ""
+  daily_report_at: ""
   timeout: 10s
