@@ -2,6 +2,11 @@
 
 All notable changes are documented here. This project follows Semantic Versioning.
 
+## 0.1.2 - 2026-09-04
+
+- Corrected systemd hardening so cPanel's set-ID sendmail transport and the restricted containment helper can operate.
+- Added journal detail when a manual health report cannot be delivered.
+
 ## 0.1.1 - 2026-09-04
 
 - Added immediate incident email through the server's local mail transport.

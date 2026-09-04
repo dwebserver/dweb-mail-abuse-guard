@@ -27,6 +27,8 @@ The protected assets are server sending reputation, customer mailbox availabilit
 | Notification outage blocks response | Local incident persistence and journal logging; webhook is secondary |
 | Compromised daemon abuses root | Sudo permits only the validation helper; the daemon has no general root command |
 
+The daemon's systemd unit cannot use `NoNewPrivileges` or `RestrictSUIDSGID`: cPanel's sendmail wrapper and the restricted sudo helper both rely on controlled set-ID transitions. The privilege boundary is therefore enforced by the dedicated service UID, exact sudo command, helper input validation, fixed executable paths, and cPanel ownership verification.
+
 ## Deliberate limitations
 
 This release does not scan WordPress, endpoints, or message content and does not determine how a credential was stolen. It contains observed mail abuse and preserves enough metadata for an administrator to investigate. It also does not replace provider feedback loops, DNS authentication, outbound content filtering, or host intrusion detection.

@@ -19,9 +19,10 @@ RestartSec=5s
 TimeoutStopSec=20s
 UMask=0027
 PrivateTmp=yes
-LockPersonality=yes
-RestrictRealtime=yes
-SystemCallArchitectures=native
+# cPanel's sendmail wrapper and the narrowly scoped containment helper require
+# their normal set-ID transitions. Do not enable NoNewPrivileges or
+# RestrictSUIDSGID for this unit without moving those operations to a socket-
+# activated companion service.
 
 [Install]
 WantedBy=multi-user.target

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -116,6 +117,7 @@ func (s *Server) report(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if err := s.reporter.Send(request.Context()); err != nil {
+		slog.Error("manual health report failed", "error", err)
 		http.Error(writer, "send health report failed", http.StatusBadGateway)
 		return
 	}
