@@ -1,0 +1,2 @@
+# The helper validates mailbox and incident syntax and invokes fixed absolute paths.
+dweb-mail-abuse-guard ALL=(root) NOPASSWD: /usr/local/libexec/dweb-mail-abuse-helper *

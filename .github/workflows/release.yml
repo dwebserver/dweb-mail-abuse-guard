@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: Build Linux archives
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          for arch in amd64 arm64; do
+            stage="dweb-mail-abuse-guard_${version}_linux_${arch}"
+            mkdir -p "dist/${stage}/dist"
+            for command in dweb-mail-abuse-guard dweb-mail-abuse-guardctl dweb-mail-abuse-helper; do
+              GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "dist/${stage}/dist/${command}" "./cmd/${command}"
+            done
+            cp -R config docs packaging README.md LICENSE CHANGELOG.md SECURITY.md "dist/${stage}/"
+            tar -C dist -czf "dist/${stage}.tar.gz" "$stage"
+          done
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/checksums.txt --generate-notes --verify-tag

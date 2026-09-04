@@ -1,0 +1,27 @@
+[Unit]
+Description=DWEB Mail Abuse Guard
+Documentation=https://github.com/dwebserver/dweb-mail-abuse-guard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dweb-mail-abuse-guard
+Group=dweb-mail-abuse-guard
+SupplementaryGroups=mail
+StateDirectory=dweb-mail-abuse-guard
+StateDirectoryMode=0750
+RuntimeDirectory=dweb-mail-abuse-guard
+RuntimeDirectoryMode=0750
+ExecStart=/usr/local/sbin/dweb-mail-abuse-guard run --config /etc/dweb-mail-abuse-guard/config.yml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0027
+PrivateTmp=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

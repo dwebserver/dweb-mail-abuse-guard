@@ -1,0 +1,46 @@
+# Start in audit mode. Move to enforce only after reviewing real traffic.
+mode: audit
+state_path: /var/lib/dweb-mail-abuse-guard/state.db
+control_socket: /run/dweb-mail-abuse-guard/control.sock
+poll_interval: 500ms
+retention: 24h
+default_profile: standard
+
+sources:
+  - kind: exim
+    path: /var/log/exim_mainlog
+    start_at_end: true
+
+profiles:
+  standard:
+    warn_recipients_5m: 50
+    contain_recipients_10m: 200
+    contain_recipients_5m_with_ips: 5
+    contain_source_ips_1h: 5
+    contain_auth_failures_5m: 40
+    provider_reject_min_recipients_5m: 20
+    incident_cooldown: 1h
+  high_volume:
+    warn_recipients_5m: 500
+    contain_recipients_10m: 2000
+    contain_recipients_5m_with_ips: 1000
+    contain_source_ips_1h: 8
+    contain_auth_failures_5m: 100
+    provider_reject_min_recipients_5m: 200
+    incident_cooldown: 1h
+
+# Optional per-mailbox profile overrides. Mailbox keys are case-insensitive.
+accounts: {}
+#  newsletter@example.com: high_volume
+
+actions:
+  helper_path: /usr/bin/sudo
+  helper_args:
+    - -n
+    - /usr/local/libexec/dweb-mail-abuse-helper
+  timeout: 20s
+
+notification:
+  # A root-managed file containing one HTTPS webhook URL, or leave blank.
+  webhook_url_file: ""
+  timeout: 10s

@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/coverage.out
+/coverage.html
+*.db
+*.db.lock
+*.log
+*.tar.gz
+.idea/
+.vscode/

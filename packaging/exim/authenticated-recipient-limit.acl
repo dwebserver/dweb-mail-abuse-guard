@@ -1,0 +1,13 @@
+# Optional RCPT-time safety net. Integrate this statement near the beginning of
+# the server's existing acl_smtp_rcpt ACL, after authentication is established.
+# Test in audit form (warn) before changing the verb to deny.
+
+warn  authenticated = *
+      ratelimit = 200 / 10m / per_rcpt / strict / $authenticated_id
+      log_message = DWEB_MAG_RATE authenticated_id=$authenticated_id rate=$sender_rate limit=$sender_rate_limit period=$sender_rate_period
+
+# Enforcing form, after calibration:
+# deny  authenticated = *
+#       ratelimit = 200 / 10m / per_rcpt / strict / $authenticated_id
+#       message = 451 4.7.1 Authenticated sending rate exceeded; contact support
+#       log_message = DWEB_MAG_BLOCK authenticated_id=$authenticated_id rate=$sender_rate limit=$sender_rate_limit period=$sender_rate_period
